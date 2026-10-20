@@ -1,0 +1,15 @@
+import { beforeEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ auth:vi.fn(), find:vi.fn(), list:vi.fn(), remove:vi.fn(), read:vi.fn() }));
+vi.mock("@/auth",()=>({auth:mocks.auth}));
+vi.mock("@/server/database/client",()=>({ getDatabase:()=>({ document:{ findFirst:mocks.find, findMany:mocks.list, deleteMany:mocks.remove } }) }));
+vi.mock("@/server/documents/storage",()=>({read:mocks.read,remove:vi.fn()}));
+import { GET, DELETE } from "../../src/app/api/documents/[id]/route";
+import { GET as list } from "../../src/app/api/documents/route";
+import { POST as search } from "../../src/app/api/search/route";
+const id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+beforeEach(()=>{ vi.resetAllMocks(); vi.stubEnv("AUTH_URL","http://localhost:3000"); });
+it("denies unauthenticated document and search access before data access",async()=>{ mocks.auth.mockResolvedValue(null); for(const handler of [GET,DELETE,list,search]) { expect((await handler(new Request(`http://localhost:3000/api/documents/${id}`))).status).toBe(401); } expect(mocks.find).not.toHaveBeenCalled(); expect(mocks.list).not.toHaveBeenCalled(); });
+it("hides another tenant's document",async()=>{ mocks.auth.mockResolvedValue({user:{id:"owner"}}); mocks.find.mockResolvedValue(null); expect((await GET(new Request(`http://localhost:3000/api/documents/${id}`))).status).toBe(404); expect(mocks.find).toHaveBeenCalledWith({where:{id,ownerId:"owner",status:{not:"DELETING"}}}); expect(mocks.read).not.toHaveBeenCalled(); });
+it("rejects cross-origin mutation before database access",async()=>{ mocks.auth.mockResolvedValue({user:{id:"owner"}}); expect((await DELETE(new Request(`http://localhost:3000/api/documents/${id}`,{method:"DELETE",headers:{origin:"http://attacker.invalid"}}))).status).toBe(403); expect(mocks.find).not.toHaveBeenCalled(); });
+it("lists only the authenticated owner",async()=>{ mocks.auth.mockResolvedValue({user:{id:"owner"}}); mocks.list.mockResolvedValue([]); expect((await list(new Request("http://localhost:3000/api/documents"))).status).toBe(200); expect(mocks.list.mock.calls[0][0].where).toEqual({ownerId:"owner"}); });
+it("rejects malformed IDs",async()=>{ mocks.auth.mockResolvedValue({user:{id:"owner"}}); expect((await GET(new Request("http://localhost:3000/api/documents/../../etc/passwd"))).status).toBe(400); expect(mocks.find).not.toHaveBeenCalled(); });

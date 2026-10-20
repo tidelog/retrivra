@@ -8,3 +8,16 @@ coverage/
 !.env.example
 .DS_Store
 *.log
+
+var/
+uploads/
+storage/
+secrets/
+.aws/
+*.pem
+*.key
+*.tsbuildinfo
+src/generated/
+playwright-report/
+test-results/
+.cache/

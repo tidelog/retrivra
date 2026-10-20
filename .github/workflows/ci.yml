@@ -1,0 +1,54 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://retrivra:ci-synthetic-only@127.0.0.1:5432/retrivra
+      TEST_DATABASE_ADMIN_URL: postgresql://retrivra:ci-synthetic-only@127.0.0.1:5432/postgres
+      POSTGRES_USER: retrivra
+      POSTGRES_PASSWORD: ci-synthetic-only
+      POSTGRES_DB: retrivra
+      STORAGE_ROOT: /tmp/retrivra-ci-storage
+      AI_PROVIDER: disabled
+      AUTH_SECRET: ci-synthetic-secret-with-at-least-32-characters
+      AUTH_URL: http://127.0.0.1:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run db:generate
+      - run: npm run db:validate
+      - run: docker compose config --quiet
+      - run: npm run db:up
+      - run: npm run db:deploy
+      - run: npm run db:status
+      - run: npm run test:db
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: always()
+        run: docker compose down
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high
+        if: always()

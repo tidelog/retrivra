@@ -1,0 +1,67 @@
+services:
+  database:
+    image: pgvector/pgvector:0.8.7-pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  app:
+    build: .
+    environment: &app_env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      DATABASE_TLS_INTERNAL: "true"
+      STORAGE_ROOT: /app/var/storage
+      AUTH_SECRET: ${AUTH_SECRET:?Set a random AUTH_SECRET of at least 32 characters}
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      AI_PROVIDER: ollama
+      OLLAMA_URL: http://ollama:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+      GENERATION_MODEL: ${GENERATION_MODEL:-qwen2.5:3b}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - document_data:/app/var/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  migrate:
+    build: .
+    environment: *app_env
+    command: ["npm", "run", "db:deploy"]
+    depends_on:
+      database:
+        condition: service_healthy
+  worker:
+    build: .
+    environment: *app_env
+    command: ["npm", "run", "worker"]
+    volumes:
+      - document_data:/app/var/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - model_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  database_data:
+  document_data:
+  model_data:

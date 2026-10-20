@@ -1,0 +1,12 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { encode } from "next-auth/jwt";
+import { NextRequest } from "next/server";
+import { proxy } from "../../src/proxy";
+const secret = "synthetic-session-secret-at-least-32-characters";
+beforeEach(() => { vi.stubEnv("AUTH_SECRET",secret); vi.stubEnv("AUTH_URL","http://localhost:3000"); });
+afterEach(() => vi.unstubAllEnvs());
+it("redirects anonymous and forged tokens before rendering",async()=>{ for(const cookie of ["", "authjs.session-token=forged"]) { const response=await proxy(new NextRequest("http://localhost:3000/dashboard",{headers:{cookie}})); expect(response.status).toBe(307); expect(response.headers.get("location")).toBe("http://localhost:3000/login"); } });
+it("accepts an actual Auth.js encrypted session",async()=>{ const token=await encode({token:{sub:"synthetic-owner"},secret,salt:"authjs.session-token",maxAge:3600}); const response=await proxy(new NextRequest("http://localhost:3000/dashboard",{headers:{cookie:`authjs.session-token=${token}`}})); expect(response.headers.get("x-middleware-next")).toBe("1"); });
+it("rejects expired sessions",async()=>{ const token=await encode({token:{sub:"synthetic-owner"},secret,salt:"authjs.session-token",maxAge:-100}); const response=await proxy(new NextRequest("http://localhost:3000/dashboard",{headers:{cookie:`authjs.session-token=${token}`}})); expect(response.status).toBe(307); });
+it("uses secure cookies for HTTPS deployments",async()=>{ vi.stubEnv("AUTH_URL","https://private.example"); const name="__Secure-authjs.session-token"; const token=await encode({token:{sub:"synthetic-owner"},secret,salt:name,maxAge:3600}); const response=await proxy(new NextRequest("https://private.example/dashboard",{headers:{cookie:`${name}=${token}`}})); expect(response.headers.get("x-middleware-next")).toBe("1"); });
+it("fails closed for weak session secrets",async()=>{ vi.stubEnv("AUTH_SECRET","weak"); expect((await proxy(new NextRequest("http://localhost:3000/dashboard"))).status).toBe(503); });
